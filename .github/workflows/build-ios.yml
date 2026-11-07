@@ -1,0 +1,66 @@
+name: Build IPA (unsigned)
+
+# Собирает неподписанный .ipa на бесплатном macOS-раннере GitHub
+# и публикует его в Releases — оттуда файл скачивается одной ссылкой, без входа.
+# Дальше подпись своим Apple ID: Sideloadly (Windows/Mac) или AltStore.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Показать версию Xcode
+        run: xcodebuild -version
+
+      - name: Собрать архив без подписи
+        run: |
+          xcodebuild \
+            -project DrinkOfTheDay.xcodeproj \
+            -scheme DrinkOfTheDay \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/DrinkOfTheDay.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Упаковать в .ipa
+        run: |
+          set -e
+          APP="$RUNNER_TEMP/DrinkOfTheDay.xcarchive/Products/Applications/DrinkOfTheDay.app"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -qr DrinkOfTheDay-unsigned.ipa Payload
+          ls -lh DrinkOfTheDay-unsigned.ipa
+
+      - name: Опубликовать в Releases
+        run: |
+          cp "$RUNNER_TEMP/DrinkOfTheDay-unsigned.ipa" ./DrinkOfTheDay-unsigned.ipa
+          gh release create "build-${{ github.run_number }}" \
+            ./DrinkOfTheDay-unsigned.ipa \
+            --title "Напиток дня — сборка ${{ github.run_number }}" \
+            --notes "Неподписанный .ipa. Подпишите его своим Apple ID через Sideloadly или AltStore." \
+            || gh release upload "build-${{ github.run_number }}" ./DrinkOfTheDay-unsigned.ipa --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Загрузить артефакт
+        uses: actions/upload-artifact@v4
+        with:
+          name: DrinkOfTheDay-unsigned-ipa
+          path: ${{ runner.temp }}/DrinkOfTheDay-unsigned.ipa
+          if-no-files-found: error
